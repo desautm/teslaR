@@ -1,0 +1,171 @@
+---
+title: "TESLA"
+author: "Marc-André Désautels"
+date: "30 avril 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+library(tidyverse)
+library(lubridate)
+library(googlesheets)
+library(stringr)
+library(rtweet)
+library(plotly)
+
+# Définition des fonctions pour le calcul des mesures sur les numéros de série.
+
+N1 <- function(ech){
+  return(round(2*median(ech)-1))
+}
+
+N2 <- function(ech){
+  return(round(2*mean(ech)-1))
+}
+
+N3 <- function(ech){
+  return(round(max(ech)+min(ech)-1))
+}
+
+N4 <- function(ech){
+  return(round((length(ech)+1)/length(ech)*max(ech)-1))
+}
+
+N5 <- function(ech){
+  return(round((max(ech)-min(ech))*(length(ech)+1)/(length(ech)-1)))
+}
+```
+
+## Googlesheets
+
+[Répertoire Model 3 Invites](https://model3ownersclub.com/threads/model-3-invites-spreadsheet.6219/)
+
+### Register a sheet
+
+Nous allons utiliser la feuille Google Sheets [Model 3 Invites #1 (Troy: There are a few identical files to avoid overcrowding)](https://docs.google.com/spreadsheets/d/1hGUj_cw1L6Xv54QfoEMG1iHlI52lcbt5prnAhVI-7pI/edit#gid=0) pour les données concernant les numéros de série VIN. Nous allons par contre transférer les données dans une feuille m'appartenant Google Sheets [Model 3 Tesla](https://docs.google.com/spreadsheets/d/188iQarE-7M49xKcTaCxEkQVd1A1FH5bFgJ5d9sQfJck/edit#gid=0) pour être en mesure de la publier sur le web.
+
+```{r}
+tesla <- gs_key("188iQarE-7M49xKcTaCxEkQVd1A1FH5bFgJ5d9sQfJck")
+```
+
+### Populate the sheet
+
+Nous allons peupler la feuille.
+
+```{r peupler, eval = FALSE}
+url <- "https://docs.google.com/spreadsheets/d/1YeLtMxFt9Lh8mndZhjOqrzFfWQ_r5T9LS-l3gQzPXCk/edit"
+
+for (i in seq(1, 6000, 1000)){
+  contenu <- paste0("=IMPORTRANGE(\"",url,"\",\"All Entries!A",i,":AI",i+999,"\")")
+  cellule <- paste0("A",i)
+  gs_edit_cells(tesla , ws = "All Entries", anchor = cellule, input = contenu)
+}
+```
+
+### Read all the data in one worksheet
+
+Nous allons lire toutes les données de la feuille **All Entries**.
+
+```{r}
+data <- tesla %>%
+  gs_read(ws = "All Entries")
+alldata <- data[3:nrow(data),]
+colnames(alldata) <- data[2,]
+```
+
+### Clean data
+
+Nous nettoyons les données.
+
+```{r}
+date <- c("Reservation date",
+          "Invite date or access date to the Configurator",
+          "Configuration date",
+          "VIN assignment date",
+          "Scheduled delivery date",
+          "Last update",
+          "Calculated delivery date")
+time <- c("Reservation time")
+int <- c("VIN (clean version x=5)")
+cleandata <- alldata %>%
+  mutate_at(date, funs(dmy)) %>%
+  mutate_at(time, funs(hm)) %>%
+  mutate_at(int, funs(as.integer))
+```
+
+```{r}
+INVITES <- cleandata %>%
+  filter(!is.na(`VIN (clean version x=5)`) & !is.na(`VIN assignment date`))
+```
+
+
+### ggplot2
+
+Nous pouvons afficher les données.
+
+```{r echo = FALSE}
+INVITES %>%
+  ggplot(mapping = aes(x = `VIN assignment date`)) +
+  geom_point(aes(y = `VIN (clean version x=5)`))+
+  labs(
+    x = "Date d'assignation du numéro VIN",
+    y = "Numéro VIN"
+  )
+```
+
+
+```{r}
+# estimateur <- tibble(estimateur = vin$VIN[1])
+# for (i in (2:nrow(vin))){
+#   estimateur <- rbind(estimateur, N4(vin$VIN[1:i]))
+# }
+# 
+# vin <- as.tibble(cbind(vin, estimateur))
+# vin %>%
+#   group_by(week(VINdate))
+```
+
+
+## Rtweet
+
+### Tous les gazouillis de l'utilisateur @Model3VINs
+
+```{r}
+Model3VINs <- get_timeline("Model3VINs", n = 3200)
+Model3VINs$text <- str_to_lower(Model3VINs$text)
+```
+
+### Tous les gazouillis contenant Highest VIN is...
+
+```{r}
+str_match(Model3VINs$text, "highest vin is (\\d+)")
+```
+
+### Database
+
+```{r}
+NHSTA <- Model3VINs %>%
+  filter(str_detect(text, "highest vin is (\\d+)") == TRUE) %>%
+  mutate(NHSTA_vin = as.integer(str_match(text, "highest vin is (\\d+)")[,2])) %>%
+  mutate(NHSTA_date = as.Date(created_at, format="%m/%d/%Y")) %>%
+  select(NHSTA_date, NHSTA_vin)
+```
+
+## Ensemble
+
+```{r}
+g <- ggplot()+
+  geom_point(data = INVITES, mapping = aes(x = `VIN assignment date`, y = `VIN (clean version x=5)`))+
+  #geom_smooth(data = INVITES, mapping = aes(x = `VIN assignment date`, y = `VIN (clean version x=5)`))+
+  geom_step(data = NHSTA, mapping = aes(x = NHSTA_date, y = NHSTA_vin), color = "blue", size = 1.5)+
+  labs(
+    x = "Date d'assignation du numéro VIN",
+    y = "Numéro VIN"
+  )+
+  xlim(as.Date(c('2017-11-01','2018-09-01')))
+ggplotly(g, tooltip = c("`VIN (clean version x=5)`"))
+```
+
