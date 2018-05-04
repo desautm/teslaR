@@ -140,7 +140,7 @@ PRODUCTION <- cleanproddata %>%
 ### Tous les gazouillis de l'utilisateur @Model3VINs
 
 ```{r}
-Model3VINs <- get_timeline("Model3VINs", n = 3200)
+Model3VINs <- get_timeline("Model3VINs", n = 3200, token = twitter_token)
 Model3VINs$text <- str_to_lower(Model3VINs$text)
 ```
 
