@@ -1,17 +1,3 @@
----
-title: "TESLA"
-author: "Marc-André Désautels"
-date: "30 avril 2018"
-output: 
-  html_document: 
-    toc: yes
-    toc_float: yes
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE,
-                      warning = FALSE,
-                      message = FALSE)
 library(tidyverse)
 library(lubridate)
 library(googlesheets)
@@ -39,7 +25,7 @@ N4 <- function(ech){
   if (length(ech) == 1) return(ech)
   else{
     l <- length(unique(ech))
-  return(round((l+1)/l*max(ech)-1))
+    return(round((l+1)/l*max(ech, na.rm = TRUE)-1))
   }
 }
 
@@ -47,63 +33,19 @@ N5 <- function(ech){
   if (length(ech) == 1) return(ech)
   else{
     l <- length(unique(ech))
-    return(round((max(ech)-min(ech))*(l+1)/(l-1)))
+    return(round((max(ech, na.rm = TRUE)-min(ech, na.rm = TRUE))*(l+1)/(l-1)))
   }
 }
-```
 
-## Googlesheets
-
-[Répertoire Model 3 Invites](https://model3ownersclub.com/threads/model-3-invites-spreadsheet.6219/)
-
-### Register a sheet
-
-Nous allons utiliser la feuille Google Sheets [Model 3 Invites #1 (Troy: There are a few identical files to avoid overcrowding)](https://docs.google.com/spreadsheets/d/1hGUj_cw1L6Xv54QfoEMG1iHlI52lcbt5prnAhVI-7pI/edit#gid=0) pour les données concernant les numéros de série VIN. Nous allons par contre transférer les données dans une feuille m'appartenant Google Sheets [Model 3 Tesla](https://docs.google.com/spreadsheets/d/188iQarE-7M49xKcTaCxEkQVd1A1FH5bFgJ5d9sQfJck/edit#gid=0) pour être en mesure de la publier sur le web.
-
-```{r}
 tesla <- gs_key("188iQarE-7M49xKcTaCxEkQVd1A1FH5bFgJ5d9sQfJck")
-```
 
-```{r}
-gs_ws_ls(tesla)
-```
-
-
-### Populate the sheet
-
-Nous allons peupler la feuille.
-
-```{r peupler, eval = FALSE}
-url <- "https://docs.google.com/spreadsheets/d/1YeLtMxFt9Lh8mndZhjOqrzFfWQ_r5T9LS-l3gQzPXCk/edit"
-
-for (i in seq(1, 6000, 1000)){
-  contenu <- paste0("=IMPORTRANGE(\"",url,"\",\"All Entries!A",i,":AI",i+999,"\")")
-  cellule <- paste0("A",i)
-  gs_edit_cells(tesla , ws = "All Entries", anchor = cellule, input = contenu)
-}
-
-contenu <- paste0("=IMPORTRANGE(\"",url,"\",\"Production!B49:N131\")")
-gs_edit_cells(tesla, ws = "Production", anchor = "A1", input = contenu)
-```
-
-### Read all the data in one worksheet
-
-Nous allons lire toutes les données de la feuille **All Entries**.
-
-```{r}
 data <- tesla %>%
   gs_read(ws = "All Entries")
 alldata <- data[3:nrow(data),]
 colnames(alldata) <- data[2,]
 proddata <- tesla %>%
   gs_read(ws = "Production")
-```
 
-### Clean data
-
-Nous nettoyons les données.
-
-```{r}
 date <- c("Reservation date",
           "Invite date or access date to the Configurator",
           "Configuration date",
@@ -115,19 +57,17 @@ time <- c("Reservation time")
 int <- c("VIN (clean version x=5)")
 cleanalldata <- alldata %>%
   mutate_at(date, funs(dmy)) %>%
-  mutate_at(time, funs(hm)) %>%
+  #mutate_at(time, funs(hm)) %>%
   mutate_at(int, funs(as.integer))
 cleanproddata <- proddata %>%
   mutate_at("Date", funs(dmy)) %>%
-  mutate_at("Total units", funs(as.integer))
+  mutate_at("Total units_1", funs(as.integer))
 
-```
-
-```{r}
 INVITES <- cleanalldata %>%
   filter(!is.na(`VIN (clean version x=5)`) & !is.na(`VIN assignment date`)) %>%
   rename(vin_invites = `VIN (clean version x=5)`, date = `VIN assignment date`) %>%
   arrange(date)
+  #mutate(N4 = N4(lag(vin_invites)), N5 = N5(lag(vin_invites)))
 n4 <- vector(mode = "double", length = nrow(INVITES))
 n5 <- vector(mode = "double", length = nrow(INVITES))
 for (i in seq(length(n4))){
@@ -137,34 +77,21 @@ for (i in seq(length(n4))){
 INVITES <- as.tibble(cbind(INVITES, tibble(N4 = n4, N5 = n5)))
 
 PRODUCTION <- cleanproddata %>%
-  filter(!is.na(`Date`) & !is.na(`Total units`)) %>%
-  rename(date = `Date`, total_unites = `Total units`) %>%
+  filter(!is.na(`Date`) & !is.na(`Total units_1`)) %>%
+  rename(date = `Date`, total_unites = `Total units_1`) %>%
   arrange(date)
-```
 
-## Rtweet
-
-### Tous les gazouillis de l'utilisateur @Model3VINs
-
-```{r}
 Model3VINs <- get_timeline("Model3VINs", n = 3200)
 Model3VINs$text <- str_to_lower(Model3VINs$text)
-```
 
-### Database
-
-```{r}
 NHSTA <- Model3VINs %>%
   filter(str_detect(text, "highest vin is (\\d+)") == TRUE) %>%
   mutate(vin_nhsta = as.integer(str_match(text, "highest vin is (\\d+)")[,2])) %>%
+  mutate(n_nhsta = as.integer(str_replace(str_match(text, "registered ([:graph:]*) new")[,2], ",", ""))) %>%
   mutate(date = as_date(created_at)) %>%
-  select(date, vin_nhsta) %>%
+  select(date, n_nhsta, vin_nhsta) %>%
   arrange(date)
-```
 
-## Ensemble
-
-```{r echo = FALSE}
 g <- ggplot()+
   geom_point(data = INVITES, mapping = aes(x = date, y = vin_invites), alpha = 0.5, size = 0.75)+
   geom_line(data = INVITES, mapping = aes(x = date, y = N4), color = "green")+
@@ -177,31 +104,9 @@ g <- ggplot()+
     y = "Numéro VIN"
   )+
   scale_x_date(breaks = date_breaks("1 month"), limits = c(as.Date("2017-11-01"),NA))
-ggplotly(g)
-```
+g
 
-## Statistiques
-
-```{r}
-summary(INVITES$vin_invites)
-N4(INVITES$vin_invites)
-N5(INVITES$vin_invites)
-```
-
-```{r}
-ggplot(INVITES, aes(vin_invites))+
-  geom_histogram(binwidth = 1000, color = "white")+
-  labs(
-    x = "VIN",
-    y = "Fréquence"
-  )
-```
-
-```{r}
-INVITES %>%
+STAT <- INVITES %>%
   mutate(semaine = week(date), mois = month(date), année = year(date)) %>%
   group_by(année, mois, semaine) %>%
-  select(année, mois, semaine, vin_invites) %>%
-  summarise(production = N5(vin_invites))
-```
-
+  select(N4, N5)
